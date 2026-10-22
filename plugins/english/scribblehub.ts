@@ -9,16 +9,14 @@ class ScribbleHubPlugin implements Plugin.PluginBase {
   name = 'Scribble Hub';
   icon = 'src/en/scribblehub/icon.png';
   site = 'https://www.scribblehub.com/';
-  version = '1.0.4';
+  version = '1.0.5';
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
 
     loadedCheerio('.search_main_box').each((i, el) => {
       const novelName = loadedCheerio(el).find('.search_title > a').text();
-      const novelCover = loadedCheerio(el)
-        .find('.search_img > img')
-        .attr('src');
+      const novelCover = loadedCheerio(el).find('.search_img img').attr('src');
       const novelUrl = loadedCheerio(el).find('.search_title > a').attr('href');
 
       if (!novelUrl) return;
