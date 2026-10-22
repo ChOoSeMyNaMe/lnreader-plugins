@@ -130,15 +130,24 @@ const proxyRequest: Connect.SimpleHandleFunction = (req, res) => {
   if (settings.fetchMode === FetchMode.CURL) {
     // POSIX shell quoting so header values and URLs cannot break the command
     const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+    const method = (req.method || 'GET').toUpperCase();
+    const hasBody = !['GET', 'HEAD'].includes(method);
 
     const args = ['curl', '-sS', '-L'];
     // Report status and content type on stderr so stdout stays the raw body
     args.push('-w', q('%{stderr}%{http_code} %{content_type}'));
+    if (hasBody) args.push('-X', q(method), '--data-binary', '@-');
     if (settings.useUserAgent && req.headers['user-agent'])
       args.push('-H', q(`User-Agent: ${req.headers['user-agent']}`));
     if (settings.cookies) args.push('-H', q(`Cookie: ${settings.cookies}`));
-    if (req.headers.origin2)
-      args.push('-H', q(`Origin: ${req.headers.origin2}`));
+    for (const name of ['content-type', 'x-requested-with']) {
+      const value = req.headers[name];
+      if (typeof value === 'string') args.push('-H', q(`${name}: ${value}`));
+    }
+    // The browser replaces the plugin's Origin with localhost, so emulate a
+    // same-site request from the target for requests that carry a body.
+    const origin = req.headers.origin2 || (hasBody ? _url.origin : undefined);
+    if (origin) args.push('-H', q(`Origin: ${origin}`));
     args.push(q(_url.href));
 
     const isWindows = process.platform === 'win32';
@@ -154,19 +163,24 @@ const proxyRequest: Connect.SimpleHandleFunction = (req, res) => {
         : {}),
     };
 
-    exec(args.join(' '), options, (error, stdout, stderr) => {
-      if (error) {
-        res.statusCode = 500;
-        res.write(`exec error: ${error}`);
+    const body: Buffer[] = [];
+    req.on('data', chunk => body.push(Buffer.from(chunk)));
+    req.on('end', () => {
+      const child = exec(args.join(' '), options, (error, stdout, stderr) => {
+        if (error) {
+          res.statusCode = 500;
+          res.write(`exec error: ${error}`);
+          res.end();
+          return;
+        }
+        const [status, ...contentType] = stderr.toString().trim().split(' ');
+        res.statusCode = parseInt(status, 10) || 200;
+        if (contentType.join(' '))
+          res.setHeader('Content-Type', contentType.join(' '));
+        res.write(stdout);
         res.end();
-        return;
-      }
-      const [status, ...contentType] = stderr.toString().trim().split(' ');
-      res.statusCode = parseInt(status, 10) || 200;
-      if (contentType.join(' '))
-        res.setHeader('Content-Type', contentType.join(' '));
-      res.write(stdout);
-      res.end();
+      });
+      child.stdin?.end(hasBody ? Buffer.concat(body) : undefined);
     });
   } else if (settings.fetchMode === FetchMode.NODE_FETCH) {
     const headers = new Headers();
