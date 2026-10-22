@@ -9,7 +9,7 @@ class ScribbleHubPlugin implements Plugin.PluginBase {
   name = 'Scribble Hub';
   icon = 'src/en/scribblehub/icon.png';
   site = 'https://www.scribblehub.com/';
-  version = '1.0.3';
+  version = '1.0.4';
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
@@ -125,34 +125,67 @@ class ScribbleHubPlugin implements Plugin.PluginBase {
 
     const chapter: Plugin.ChapterItem[] = [];
 
+    const units = {
+      sec: 'second',
+      min: 'minute',
+      hour: 'hour',
+      day: 'day',
+      week: 'week',
+      month: 'month',
+      year: 'year',
+    } as const;
+    const months = [
+      'jan',
+      'feb',
+      'mar',
+      'apr',
+      'may',
+      'jun',
+      'jul',
+      'aug',
+      'sep',
+      'oct',
+      'nov',
+      'dec',
+    ];
+
     const parseISODate = (date: string) => {
-      if (date.includes('ago')) {
-        const dayJSDate = dayjs(new Date()); // today
-        const timeAgo = date.match(/\d+/)?.[0] || '';
-        const timeAgoInt = parseInt(timeAgo, 10);
+      // Relative dates, e.g. "17 hours ago", "1 min ago"
+      const relative = date.match(
+        /(\d+)\s*(sec|min|hour|day|week|month|year)/i,
+      );
+      if (relative && date.includes('ago')) {
+        const unit = units[relative[2].toLowerCase() as keyof typeof units];
+        return dayjs().subtract(parseInt(relative[1], 10), unit).toISOString();
+      }
 
-        if (!timeAgo) return null; // there is no number!
-
-        if (date.includes('hours ago') || date.includes('hour ago')) {
-          dayJSDate.subtract(timeAgoInt, 'hours'); // go back N hours
-        }
-
-        if (date.includes('days ago') || date.includes('day ago')) {
-          dayJSDate.subtract(timeAgoInt, 'days'); // go back N days
-        }
-
-        if (date.includes('months ago') || date.includes('month ago')) {
-          dayJSDate.subtract(timeAgoInt, 'months'); // go back N months
-        }
-
-        return dayJSDate.toISOString();
+      // Absolute dates, e.g. "Mar 31, 2022 07:32 PM" or "Mar 31, 2022"
+      const absolute = date.match(
+        /([a-z]{3})[a-z]*\s+(\d{1,2}),\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*([ap]m))?/i,
+      );
+      if (absolute) {
+        const month = months.indexOf(absolute[1].toLowerCase());
+        if (month === -1) return null;
+        let hour = absolute[4] ? parseInt(absolute[4], 10) % 12 : 0;
+        if (absolute[6]?.toLowerCase() === 'pm') hour += 12;
+        return dayjs(
+          new Date(
+            parseInt(absolute[3], 10),
+            month,
+            parseInt(absolute[2], 10),
+            hour,
+            absolute[5] ? parseInt(absolute[5], 10) : 0,
+          ),
+        ).toISOString();
       }
       return null;
     };
 
     loadedCheerio('.toc_w').each((i, el) => {
       const chapterName = loadedCheerio(el).find('.toc_a').text();
-      const releaseDate = loadedCheerio(el).find('.fic_date_pub').text();
+      const dateEl = loadedCheerio(el).find('.fic_date_pub');
+      // The title attribute contains the full timestamp
+      const releaseDate = dateEl.attr('title') || dateEl.text();
       const chapterUrl = loadedCheerio(el).find('a').attr('href');
 
       if (!chapterUrl) return;
