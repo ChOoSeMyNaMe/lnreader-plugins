@@ -9,7 +9,7 @@ class ScribbleHubPlugin implements Plugin.PluginBase {
   name = 'Scribble Hub';
   icon = 'src/en/scribblehub/icon.png';
   site = 'https://www.scribblehub.com/';
-  version = '1.0.2';
+  version = '1.0.3';
 
   parseNovels(loadedCheerio: CheerioAPI) {
     const novels: Plugin.NovelItem[] = [];
@@ -108,14 +108,16 @@ class ScribbleHubPlugin implements Plugin.PluginBase {
       ? 'Ongoing'
       : 'Completed';
 
-    const formData = new FormData();
-    formData.append('action', 'wi_getreleases_pagination');
-    formData.append('pagenum', '-1');
-    formData.append('mypostid', novelPath.split('/')[1]);
-
     const data = await fetchApi(`${this.site}wp-admin/admin-ajax.php`, {
       method: 'POST',
-      body: formData,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        // The site's firewall rejects AJAX requests without a matching Origin
+        Origin: this.site.replace(/\/$/, ''),
+        Referer: this.site + novelPath,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: `action=wi_getreleases_pagination&pagenum=-1&mypostid=${novelPath.split('/')[1]}`,
     });
     const text = await data.text();
 
@@ -176,8 +178,11 @@ class ScribbleHubPlugin implements Plugin.PluginBase {
     return chapterText;
   }
 
-  async searchNovels(searchTerm: string): Promise<Plugin.NovelItem[]> {
-    const url = `${this.site}?s=${encodeURIComponent(searchTerm)}&post_type=fictionposts`;
+  async searchNovels(
+    searchTerm: string,
+    page: number,
+  ): Promise<Plugin.NovelItem[]> {
+    const url = `${this.site}series-finder/?sf=1&sh=${encodeURIComponent(searchTerm)}&pg=${page}`;
     const result = await fetchApi(url);
     const body = await result.text();
 
