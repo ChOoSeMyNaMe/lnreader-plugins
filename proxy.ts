@@ -128,29 +128,43 @@ const proxyRequest: Connect.SimpleHandleFunction = (req, res) => {
   console.log('\x1b[36m', '----------------');
 
   if (settings.fetchMode === FetchMode.CURL) {
-    let curl = `curl -L '${_url.href}'`;
-    if (settings.useUserAgent)
-      curl += ` -H 'User-Agent: ${req.headers['user-agent']}'`;
-    if (settings.cookies) curl += ` -H 'Cookie: ${settings.cookies}'`;
-    if (req.headers.origin2) curl += ` -H 'Origin: ${req.headers.origin2}'`;
+    // POSIX shell quoting so header values and URLs cannot break the command
+    const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+    const args = ['curl', '-sS', '-L'];
+    // Report status and content type on stderr so stdout stays the raw body
+    args.push('-w', q('%{stderr}%{http_code} %{content_type}'));
+    if (settings.useUserAgent && req.headers['user-agent'])
+      args.push('-H', q(`User-Agent: ${req.headers['user-agent']}`));
+    if (settings.cookies) args.push('-H', q(`Cookie: ${settings.cookies}`));
+    if (req.headers.origin2)
+      args.push('-H', q(`Origin: ${req.headers.origin2}`));
+    args.push(q(_url.href));
 
     const isWindows = process.platform === 'win32';
-    const options = isWindows
-      ? {
-          shell:
-            process.env.BASH_LOCATION ||
-            process.env.ProgramFiles + '\\git\\usr\\bin\\bash.exe',
-        }
-      : {};
+    const options = {
+      encoding: 'buffer' as const,
+      maxBuffer: 100 * 1024 * 1024,
+      ...(isWindows
+        ? {
+            shell:
+              process.env.BASH_LOCATION ||
+              process.env.ProgramFiles + '\\git\\usr\\bin\\bash.exe',
+          }
+        : {}),
+    };
 
-    exec(curl, options, (error, stdout) => {
+    exec(args.join(' '), options, (error, stdout, stderr) => {
       if (error) {
         res.statusCode = 500;
         res.write(`exec error: ${error}`);
         res.end();
         return;
       }
-      res.statusCode = 200;
+      const [status, ...contentType] = stderr.toString().trim().split(' ');
+      res.statusCode = parseInt(status, 10) || 200;
+      if (contentType.join(' '))
+        res.setHeader('Content-Type', contentType.join(' '));
       res.write(stdout);
       res.end();
     });
